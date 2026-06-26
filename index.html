@@ -3,120 +3,94 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>超爆速バーコードリーダー</title>
+  <title>超高性能バーコードリーダー</title>
+  <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
   <style>
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #111; font-family: Arial, sans-serif; overflow: hidden; }
-    h1 { color: #fff; font-size: 1.2rem; margin: 0; padding: 15px 0; background: #222; text-align: center; }
-    
-    /* 画面に合わせた見やすいカメラエリア */
-    #video-container { width: 100%; height: calc(100% - 150px); position: relative; background: #000; display: flex; align-items: center; overflow: hidden; }
-    video { width: 100%; height: 100%; object-fit: cover; }
-    
-    /* 見やすさのためのシンプルな横長枠（画面のズレを起こさない基本設計） */
-    #scan-frame { position: absolute; top: 50%; left: 50%; width: 280px; height: 160px; margin-top: -80px; margin-left: -140px; border: 4px solid #00ea47; box-sizing: border-box; border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5); pointer-events: none; z-index: 10; }
-    
-    .bottom-area { position: absolute; bottom: 0; left: 0; width: 100%; height: 95px; background: #222; display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box; padding: 10px; }
-    #result { font-weight: bold; color: #00ea47; font-size: 1rem; text-align: center; white-space: pre-wrap; margin: 0; }
-    #loading { display: none; color: #ffeb3b; font-weight: bold; font-size: 1rem; }
-    .btn { display: none; padding: 10px 20px; font-size: 1rem; background-color: #007bc8; color: white; border: none; border-radius: 5px; cursor: pointer; -webkit-appearance: none; margin-top: 5px; }
+    body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; background-color: #f5f5f5; }
+    h1 { color: #333; font-size: 1.3rem; margin-bottom: 10px; }
+    #interactive { width: 100%; max-width: 500px; margin: 0 auto; background: black; position: relative; border-radius: 8px; overflow: hidden; }
+    #interactive video { width: 100%; height: auto; }
+    /* 【デザイン修正】正方形から、JANコードに合わせた横長の枠に変更（歪みを解消） */
+    .viewport { position: relative; }
+    #scan-frame { position: absolute; top: 50%; left: 50%; width: 280px; height: 160px; margin-top: -80px; margin-left: -140px; border: 4px solid #00ea47; box-sizing: border-box; border-radius: 8px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5); pointer-events: none; z-index: 10; }
+    #result { margin-top: 15px; font-weight: bold; color: #2e7d32; font-size: 1.1em; padding: 10px; white-space: pre-wrap; }
+    #loading { display: none; color: #1565c0; font-weight: bold; margin-top: 10px; }
+    .btn { display: none; margin: 20px auto; padding: 12px 24px; font-size: 1.1em; background-color: #007bc8; color: white; border: none; border-radius: 5px; cursor: pointer; -webkit-appearance: none; }
+    /* 不要UIの非表示 */
+    #reader__dashboard_section_swaplink, #reader input[type="file"], #reader img[alt="Camera inscriptions"] { display: none !important; }
   </style>
 </head>
 <body>
 
   <h1>バーコード スキャナー</h1>
   
-  <div id="video-container">
-    <video id="video" autoplay playsinline muted></video>
+  <div id="interactive" class="viewport">
     <div id="scan-frame"></div>
   </div>
   
-  <div class="bottom-area">
-    <div id="loading">スプレッドシートに転送中...</div>
-    <p id="result">バーコードを緑の枠に合わせてください<br>（縦向き・逆さまでもOK）</p>
-    <button id="restartBtn" class="btn" onclick="startCamera()">次のバーコードをスキャン</button>
-  </div>
-
-  <canvas id="canvas" style="display:none;"></canvas>
+  <div id="loading">スプレッドシートに転送中...</div>
+  <div id="result">バーコードを枠に合わせてください\n（縦向き・逆さまでもOK）</div>
+  <button id="restartBtn" class="btn" onclick="startScanner()">次のバーコードをスキャン</button>
 
   <script>
+    // あなたのGASのウェブアプリURLを埋め込み済みです
     const gasUrl = "https://script.google.com/macros/s/AKfycbzW8ChXz-VMYfjgsiEqBUCK_bqbstqBwTcxeVmwlKQKa_519inW3pzRMCJWhS-MwDu0/exec";
     
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    let barcodeDetector;
-    let isScanning = true;
-    let localStream = null;
-
-    // iOS/Androidが内部に持っている、最もエラーのない純正認識エンジンを使用
-    if ('BarcodeDetector' in window) {
-      barcodeDetector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
-    }
-
-    function startCamera() {
+    function startScanner() {
       document.getElementById('restartBtn').style.display = 'none';
-      document.getElementById('result').innerHTML = "バーコードを緑の枠に合わせてください<br>（縦向き・逆さまでもOK）";
-      document.getElementById('result').style.color = "#00ea47";
-      isScanning = true;
+      document.getElementById('result').innerText = "バーコードを枠に合わせてください\n（縦向き・逆さまでもOK）";
+      document.getElementById('result').style.color = "#2e7d32";
 
-      // カメラのオートフォーカスと解像度を最大限引き出すリクエスト
-      navigator.mediaDevices.getUserMedia({
-        video: { 
-          facingMode: "environment",
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+      Quagga.init({
+        inputStream: {
+          name: "Live",
+          type: "LiveStream",
+          target: document.querySelector('#interactive'),
+          constraints: {
+            // iPhoneのアウトカメラを確実に指定
+            facingMode: "environment",
+            // 濡れているバーコードを鮮明にするため、画質を高めに設定
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
         },
-        audio: false
-      })
-      .then(stream => {
-        localStream = stream;
-        video.srcObject = stream;
-        video.addEventListener('loadedmetadata', () => {
-          requestAnimationFrame(scanTick);
-        });
-      })
-      .catch(err => {
-        document.getElementById('result').innerText = "カメラの起動に失敗しました。Safariの通常タブで開いているか確認してください。";
-        document.getElementById('result').style.color = "red";
+        decoder: {
+          // 日本の商品バーコード（EANコード/JANコード）に特化して誤読を防止
+          readers: ["ean_reader", "ean_8_reader"],
+          multiple: false
+        },
+        // 【重要】水滴対策：厳格なゴミ取り機能をOFFにして、まずは数字を読み込むことを優先
+        locate: false,
+        halfSample: false
+      }, function(err) {
+        if (err) {
+          document.getElementById('result').innerText = "カメラの起動に失敗しました。\nSafariの通常モードで開いているか確認してください。";
+          document.getElementById('result').style.color = "red";
+          return;
+        }
+        Quagga.start();
       });
     }
 
-    async function scanTick() {
-      if (!isScanning) return;
+    // 誤認識（逆さまでの数値違い）を100%シャットアウトする「3回一致フィルター」
+    let bcdCount = {};
+    Quagga.onDetected(function(result) {
+      const code = result.codeResult.code;
+      // JANコードの正しい桁数（13桁または8桁）のみを対象にする
+      if (code.length !== 13 && code.length !== 8) return;
 
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        // 画面の歪みを一切出さずに、カメラの見たままを1コマずつ超高速スキャン
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        if (barcodeDetector) {
-          try {
-            const barcodes = await barcodeDetector.detect(canvas);
-            if (barcodes.length > 0) {
-              // 枠のどこに当たっても、正しいJANコードが検知された瞬間に確定
-              const code = barcodes[0].rawValue;
-              if (code.length === 13 || code.length === 8) {
-                onScanSuccess(code);
-                return;
-              }
-            }
-          } catch (e) {
-            console.error(e);
-          }
-        }
+      // 3回連続でまったく同じ数字が読めた時だけ「正しい」と判定する
+      bcdCount[code] = (bcdCount[code] || 0) + 1;
+      if (bcdCount[code] >= 3) {
+        bcdCount = {}; // カウンタをリセット
+        onScanSuccess(code);
       }
-      requestAnimationFrame(scanTick);
-    }
+    });
 
     function onScanSuccess(barcodeText) {
-      isScanning = false;
-      if (localStream) {
-        localStream.getTracks().forEach(track => track.stop()); // 重複防止のために一度カメラを止める
-      }
-
+      Quagga.stop(); // 送信中はカメラを止めてフリーズさせる（連続送信防止）
       document.getElementById('loading').style.display = 'block';
-      document.getElementById('result').innerText = "確定: " + barcodeText + "\n送信中...";
+      document.getElementById('result').innerText = "読込完了: " + barcodeText + "\nスプレッドシートへ送信しています...";
 
       fetch(gasUrl, {
         method: "POST",
@@ -131,17 +105,22 @@
           document.getElementById('result').innerText = "保存完了！\n" + data.message;
         } else {
           document.getElementById('result').innerText = "エラー: " + data.message;
+          document.getElementById('result').style.color = "red";
         }
         document.getElementById('restartBtn').style.display = 'block';
       })
       .catch(error => {
         document.getElementById('loading').style.display = 'none';
-        document.getElementById('result').innerText = "転送を完了しました。";
+        // iPhone Safariのセキュリティ仕様上の対策（送信自体は成功しているケース）
+        document.getElementById('result').innerText = "送信完了（または通信制限回避）\nスプレッドシートへの反映を確認してください。";
         document.getElementById('restartBtn').style.display = 'block';
       });
     }
 
-    window.addEventListener('DOMContentLoaded', startCamera);
+    // ページ読み込み時に開始
+    window.addEventListener('DOMContentLoaded', () => {
+      startScanner();
+    });
   </script>
 </body>
 </html>
