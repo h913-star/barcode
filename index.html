@@ -3,98 +3,141 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>超高性能バーコードリーダー</title>
-  <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
+  <title>AppSheet風バーコードリーダー</title>
   <style>
-    /* 画面全体で崩れないようにベースを固定 */
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #111; font-family: Arial, sans-serif; overflow: hidden; }
+    /* AppSheetのように画面全体をカメラにするためのリセット */
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; font-family: Arial, sans-serif; overflow: hidden; }
     
-    h1 { color: #fff; font-size: 1.2rem; margin: 0; padding: 15px 0; background: #222; text-align: center; }
+    /* カメラ映像を画面いっぱいに広げる（全画面表示） */
+    #video-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; background: #000; }
+    video { width: 100%; height: 100%; object-fit: cover; }
     
-    /* カメラ映像をスマホ画面（縦長）の真ん中に綺麗に収める設定 */
-    #interactive { width: 100%; height: calc(100% - 150px); position: relative; background: #000; display: flex; align-items: center; overflow: hidden; }
-    #interactive video { width: 100% !important; height: auto !important; object-fit: contain; }
+    /* AppSheet風のシンプルなスキャンエリア（中央の細めの枠） */
+    #scan-frame { position: absolute; top: 50%; left: 50%; width: 280px; height: 140px; margin-top: -70px; margin-left: -140px; border: 2px solid #00ea47; box-sizing: border-box; border-radius: 4px; pointer-events: none; z-index: 10; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4); }
     
-    /* スキャン枠：画面のど真ん中に綺麗な「正方形」で配置（縦でも横でも入りやすい） */
-    #scan-frame { position: absolute; top: 50%; left: 50%; width: 240px; height: 240px; margin-top: -120px; margin-left: -120px; border: 4px solid #00ea47; box-sizing: border-box; border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6); pointer-events: none; z-index: 10; }
+    /* スキャンエリア中央を走るレーザー風の赤い線 */
+    #scan-line { position: absolute; top: 50%; left: 50%; width: 270px; height: 2px; background-color: #ff3b30; margin-left: -135px; box-shadow: 0 0 4px #ff3b30; z-index: 11; pointer-events: none; }
     
-    /* テキストやボタンを配置する下部エリア */
-    .bottom-area { position: absolute; bottom: 0; left: 0; width: 100%; height: 95px; background: #222; display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box; padding: 5px; }
-    #result { font-weight: bold; color: #00ea47; font-size: 0.95rem; text-align: center; white-space: pre-wrap; margin: 0; }
-    #loading { display: none; color: #ffeb3b; font-weight: bold; font-size: 1rem; }
-    .btn { display: none; padding: 10px 20px; font-size: 1rem; background-color: #007bc8; color: white; border: none; border-radius: 5px; cursor: pointer; -webkit-appearance: none; margin-top: 5px; }
+    /* 下部のステータス表示 */
+    .status-overlay { position: absolute; bottom: 30px; left: 0; width: 100%; text-align: center; z-index: 20; pointer-events: none; }
+    #result { display: inline-block; background: rgba(0,0,0,0.7); color: #fff; font-weight: bold; font-size: 0.9rem; padding: 10px 20px; border-radius: 20px; margin: 0; max-width: 80%; white-space: pre-wrap; }
+    #loading { display: none; color: #ffeb3b; font-weight: bold; background: rgba(0,0,0,0.8); padding: 10px 20px; border-radius: 20px; }
     
-    /* 不要UIの削除 */
-    #reader__dashboard_section_swaplink, #reader input[type="file"], #reader img[alt="Camera inscriptions"] { display: none !important; }
+    /* 次のスキャンボタン（画面中央に浮かせる） */
+    .btn-overlay { position: absolute; top: 70%; left: 0; width: 100%; text-align: center; z-index: 30; }
+    .btn { display: none; margin: 0 auto; padding: 12px 30px; font-size: 1.1rem; background-color: #1a73e8; color: white; border: none; border-radius: 24px; cursor: pointer; -webkit-appearance: none; box-shadow: 0 2px 6px rgba(0,0,0,0.3); font-weight: bold; }
   </style>
 </head>
 <body>
 
-  <h1>バーコード スキャナー</h1>
-  
-  <div id="interactive" class="viewport">
+  <div id="video-container">
+    <video id="video" autoplay playsinline muted></video>
     <div id="scan-frame"></div>
+    <div id="scan-line"></div>
   </div>
   
-  <div class="bottom-area">
+  <div class="status-overlay">
     <div id="loading">スプレッドシートに転送中...</div>
-    <p id="result">バーコードを緑の枠に合わせてください<br>（縦向き・逆さまでもOK）</p>
-    <button id="restartBtn" class="btn" onclick="startScanner()">次のバーコードをスキャン</button>
+    <p id="result">バーコードを枠に合わせてください<br>(縦・横どちらでもOK)</p>
   </div>
+
+  <div class="btn-overlay">
+    <button id="restartBtn" class="btn" onclick="startCamera()">タップして次のスキャン</button>
+  </div>
+
+  <canvas id="canvas" style="display:none;"></canvas>
+  <canvas id="canvas-rot" style="display:none;"></canvas>
 
   <script>
     const gasUrl = "https://script.google.com/macros/s/AKfycbzW8ChXz-VMYfjgsiEqBUCK_bqbstqBwTcxeVmwlKQKa_519inW3pzRMCJWhS-MwDu0/exec";
     
-    function startScanner() {
-      document.getElementById('restartBtn').style.display = 'none';
-      document.getElementById('result').innerHTML = "バーコードを緑の枠に合わせてください<br>（縦向き・逆さまでもOK）";
-      document.getElementById('result').style.color = "#00ea47";
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const canvasRot = document.getElementById('canvas-rot');
+    const ctxRot = canvasRot.getContext('2d');
+    
+    let barcodeDetector;
+    let isScanning = true;
+    let localStream = null;
 
-      Quagga.init({
-        inputStream: {
-          name: "Live",
-          type: "LiveStream",
-          target: document.querySelector('#interactive'),
-          constraints: {
-            facingMode: "environment",
-            width: { ideal: 640 },  // スマホに合わせた現実的な解像度に調整して歪みを防止
-            height: { ideal: 480 }
-          },
-        },
-        decoder: {
-          readers: ["ean_reader", "ean_8_reader"],
-          multiple: false
-        },
-        locate: true,
-        halfSample: true // 処理速度アップと画面フィットを優先
-      }, function(err) {
-        if (err) {
-          document.getElementById('result').innerText = "カメラの起動に失敗しました。";
-          return;
-        }
-        Quagga.start();
+    // ブラウザ・スマホ標準の最強認識エンジンを起動
+    if ('BarcodeDetector' in window) {
+      barcodeDetector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+    } else {
+      alert("最新のSafari環境で開いてください。");
+    }
+
+    function startCamera() {
+      document.getElementById('restartBtn').style.display = 'none';
+      document.getElementById('result').innerHTML = "バーコードを枠に合わせてください<br>(縦・横どちらでもOK)";
+      isScanning = true;
+
+      navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      })
+      .then(stream => {
+        localStream = stream;
+        video.srcObject = stream;
+        video.addEventListener('loadedmetadata', () => {
+          requestAnimationFrame(scanTick);
+        });
+      })
+      .catch(err => {
+        document.getElementById('result').innerText = "カメラの起動に失敗しました。";
       });
     }
 
-    // 誤認識（逆さまでの数字間違い）を完全に防ぐフィルター
-    let bcdCount = {};
-    Quagga.onDetected(function(result) {
-      const code = result.codeResult.code;
-      if (code.length !== 13 && code.length !== 8) return;
+    async function scanTick() {
+      if (!isScanning) return;
 
-      // 3回連続で同じ数字が読めたら確定
-      bcdCount[code] = (bcdCount[code] || 0) + 1;
-      if (bcdCount[code] >= 3) {
-        bcdCount = {};
-        onScanSuccess(code);
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        // 1. 通常（横向き）の画像を解析
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        if (barcodeDetector) {
+          try {
+            let barcodes = await barcodeDetector.detect(canvas);
+            if (barcodes.length > 0) {
+              onScanSuccess(barcodes[0].rawValue);
+              return;
+            }
+
+            // 2. 【縦向きバーコード対策】画像を内部で90度回転させて同時スキャン！
+            canvasRot.width = video.videoHeight;
+            canvasRot.height = video.videoWidth;
+            ctxRot.translate(canvasRot.width / 2, canvasRot.height / 2);
+            ctxRot.rotate(90 * Math.PI / 180);
+            ctxRot.drawImage(video, -canvas.width / 2, -canvas.height / 2, canvas.width, canvas.height);
+            ctxRot.setTransform(1, 0, 0, 1, 0, 0); // リセット
+
+            barcodes = await barcodeDetector.detect(canvasRot);
+            if (barcodes.length > 0) {
+              onScanSuccess(barcodes[0].rawValue);
+              return;
+            }
+          } catch (e) {
+            console.error(e);
+          }
+        }
       }
-    });
+      requestAnimationFrame(scanTick);
+    }
 
     function onScanSuccess(barcodeText) {
-      Quagga.stop();
+      isScanning = false;
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop()); // カメラを一時止め
+      }
+
+      // iPhoneの標準バイブレーションをシミュレート（読み取り通知）
+      if (navigator.vibrate) navigator.vibrate(200);
 
       document.getElementById('loading').style.display = 'block';
-      document.getElementById('result').innerText = "確定: " + barcodeText + "\n送信中...";
+      document.getElementById('result').innerText = "読込完了: " + barcodeText;
 
       fetch(gasUrl, {
         method: "POST",
@@ -114,14 +157,12 @@
       })
       .catch(error => {
         document.getElementById('loading').style.display = 'none';
-        document.getElementById('result').innerText = "送信完了しました。";
+        document.getElementById('result').innerText = "スプレッドシートへ送信しました。";
         document.getElementById('restartBtn').style.display = 'block';
       });
     }
 
-    window.addEventListener('DOMContentLoaded', () => {
-      startScanner();
-    });
+    window.addEventListener('DOMContentLoaded', startCamera);
   </script>
 </body>
 </html>
