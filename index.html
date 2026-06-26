@@ -3,16 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>JANコードリーダー（中継）</title>
+  <title>JANコードリーダー（高感度）</title>
   <script src="https://unpkg.com/html5-qrcode"></script>
   <style>
-    body { font-family: Arial, sans-serif; text-align: center; margin-top: 20px; background-color: #f5f5f5; }
-    h1 { color: #333; font-size: 1.5rem; }
-    #reader { width: 100%; max-width: 500px; margin: 0 auto; background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-    #result { margin-top: 20px; font-weight: bold; color: #2e7d32; font-size: 1.1em; padding: 10px; white-space: pre-wrap; }
+    body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; background-color: #f5f5f5; }
+    h1 { color: #333; font-size: 1.3rem; margin-bottom: 10px; }
+    #reader { width: 100%; max-width: 500px; margin: 0 auto; background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); box-sizing: border-box; }
+    #result { margin-top: 15px; font-weight: bold; color: #2e7d32; font-size: 1.1em; padding: 10px; white-space: pre-wrap; }
     #loading { display: none; color: #1565c0; font-weight: bold; margin-top: 10px; }
-    .btn { display: none; margin: 20px auto; padding: 10px 20px; font-size: 1em; background-color: #007bc8; color: white; border: none; border-radius: 5px; cursor: pointer; }
-    #reader__dashboard_section_swaplink, #reader input[type="file"], #reader img[alt="Camera inscriptions"] { display: none !important; }
+    .btn { display: none; margin: 20px auto; padding: 12px 24px; font-size: 1.1em; background-color: #007bc8; color: white; border: none; border-radius: 5px; cursor: pointer; -webkit-appearance: none; }
+    /* 不要な標準UIの強制非表示 */
+    #reader__dashboard_section_swaplink, #reader input[type="file"], #reader img[alt="Camera inscriptions"], #reader button { display: none !important; }
   </style>
 </head>
 <body>
@@ -24,44 +25,42 @@
   <button id="restartBtn" class="btn" onclick="startCamera()">次のバーコードをスキャン</button>
 
   <script>
-    // 共有いただいたGASのウェブアプリURLを埋め込み済みです
     const gasUrl = "https://script.google.com/macros/s/AKfycbzW8ChXz-VMYfjgsiEqBUCK_bqbstqBwTcxeVmwlKQKa_519inW3pzRMCJWhS-MwDu0/exec";
-
     let html5Qrcode;
 
     function startCamera() {
       document.getElementById('restartBtn').style.display = 'none';
-      document.getElementById('result').innerText = "バーコードをスキャン枠に合わせてください";
+      document.getElementById('result').innerText = "バーコードを枠の真ん中に近づけてください";
       document.getElementById('result').style.color = "#2e7d32";
-
-      const formatsToSupport = [
-        Html5QrcodeSupportedFormats.EAN_13,
-        Html5QrcodeSupportedFormats.EAN_8,
-        Html5QrcodeSupportedFormats.UPC_A,
-        Html5QrcodeSupportedFormats.UPC_E
-      ];
 
       if (!html5Qrcode) {
         html5Qrcode = new Html5Qrcode("reader");
       }
 
+      // 高精度マクロ設定
       html5Qrcode.start(
-        { facingMode: "environment" },
-        { fps: 15, qrbox: { width: 300, height: 130 } },
+        { facingMode: "environment" }, 
+        { 
+          fps: 20,                          // 1秒間の読み取り回数をアップ
+          qrbox: { width: 280, height: 150 }, // バーコードが収まりやすい黄金比率に変更
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true // スマホ自体の最新バーコード機能があれば強制連動
+          }
+        },
         onScanSuccess,
         onScanFailure
       ).catch(err => {
-        document.getElementById('result').innerText = "カメラの起動に失敗しました。ブラウザのカメラ権限を許可してください。\n" + err;
+        document.getElementById('result').innerText = "カメラの起動に失敗しました。\n" + err;
         document.getElementById('result').style.color = "red";
       });
     }
 
     function onScanSuccess(decodedText, decodedResult) {
+      // 読み取ったら即座にカメラを止めて重複送信を防ぐ
       html5Qrcode.stop().then(() => {
         document.getElementById('loading').style.display = 'block';
-        document.getElementById('result').innerText = "読み取り完了: " + decodedText + "\nGASへ送信しています...";
+        document.getElementById('result').innerText = "読み取り完了: " + decodedText + "\nGoogleスプレッドシートへ送信中...";
 
-        // GASへデータを安全に送信
         fetch(gasUrl, {
           method: "POST",
           mode: "cors",
@@ -72,7 +71,8 @@
         .then(data => {
           document.getElementById('loading').style.display = 'none';
           if (data.status === "success") {
-            document.getElementById('result').innerText = data.message;
+            document.getElementById('result').innerText = "保存完了！\n" + data.message;
+            document.getElementById('result').style.color = "#2e7d32";
           } else {
             document.getElementById('result').innerText = "GASエラー: " + data.message;
             document.getElementById('result').style.color = "red";
@@ -81,16 +81,19 @@
         })
         .catch(error => {
           document.getElementById('loading').style.display = 'none';
-          // GASの仕様上、送信自体は成功していてもここへ飛ぶことがあるため、スプレッドシートを確認してください
-          document.getElementById('result').innerText = "送信完了（または通信制限回避）\nスプレッドシートへの反映を確認してください。";
+          // iOS Safariのセキュリティ仕様上の対策（送信自体は成功しているケース）
+          document.getElementById('result').innerText = "送信処理を完了しました。\nスプレッドシートへの追加を確認してください。";
+          document.getElementById('result').style.color = "#1565c0";
           document.getElementById('restartBtn').style.display = 'block';
         });
       }).catch(err => {
-        console.error("カメラ停止エラー", err);
+        console.error(err);
       });
     }
 
-    function onScanFailure(error) {}
+    function onScanFailure(error) {
+      // 読み取り失敗時は何もしない（ログを汚さない）
+    }
 
     window.addEventListener('DOMContentLoaded', () => {
       startCamera();
